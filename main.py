@@ -1,4 +1,5 @@
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ResourceTemplateReference, Completion, CompletionArgument
 from datetime import datetime, timezone, timedelta
 
 from db import (
@@ -36,6 +37,65 @@ def remove_channel_tool(channelname: str) -> str:
         return f"Канал @{channelname} удалён"
 
     return f"Канал @{channelname} не найден"
+
+
+@mcp.resource("tg://channels")
+def channels_resource() -> str:
+    """Список отслеживаемых Telegram-каналов"""
+    channels = list_channels()
+
+    if not channels:
+        return "Нет отслеживаемых каналов"
+
+    lines = [f"@{c['channelname']} (добавлен {c['added_at']})" for c in channels]
+
+    return "\n".join(lines)
+
+
+@mcp.resource("tg://channel/{name}")
+def channel_resource(name: str) -> str:
+    """Информация об указанном Telegram-канале"""
+    name = name.strip().lower().lstrip("@")
+    channel = get_channel(name)
+
+    if not channel:
+        return f"Канал @{name} не найден"
+
+    return f"@{channel['channelname']} (добавлен {channel['added_at']})"
+
+
+@mcp.resource("tg://channel/{name}/posts")
+def channel_posts_resource(name: str) -> str:
+    """Последние посты канала из кеша (без фетчинга с t.me)"""
+    name = name.strip().lower().lstrip("@")
+    channel = get_channel(name)
+
+    if not channel:
+        return f"Канал @{name} не найден"
+
+    posts = get_posts([channel["id"]], "1970-01-01")[:10]
+
+    if not posts:
+        return f"Нет постов в кеше для @{name}"
+
+    parts = [f"@{name}:"]
+
+    for p in posts:
+        preview = (p["text"][:200] + "…") if len(p["text"]) > 200 else p["text"]
+        parts.append(f"[{p['date']}] {preview}")
+
+    return "\n".join(parts)
+
+
+@mcp.completion()
+async def complete_channel_name(ref, argument: CompletionArgument, context) -> Completion | None:
+    if not isinstance(ref, ResourceTemplateReference):
+        return None
+
+    channels = list_channels()
+    names = [c["channelname"] for c in channels]
+
+    return Completion(values=[n for n in names if n.lower().startswith(argument.value.lower())])
 
 
 @mcp.tool()
