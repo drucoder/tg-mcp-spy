@@ -1,5 +1,13 @@
 from mcp.server.fastmcp import FastMCP
-from mcp.types import ResourceTemplateReference, Completion, CompletionArgument
+from mcp.server.fastmcp.prompts import base
+from mcp.types import (
+    ResourceTemplateReference,
+    PromptReference,
+    Completion,
+    CompletionArgument,
+    EmbeddedResource,
+    TextResourceContents,
+)
 from datetime import datetime, timezone, timedelta
 
 from db import (
@@ -87,15 +95,61 @@ def channel_posts_resource(name: str) -> str:
     return "\n".join(parts)
 
 
+@mcp.prompt()
+def digest(days: int = 7, channels: str | None = None):
+    """Составить дайджест постов за последние N дней по указанным каналам"""
+    instruction = (
+        f"посмотри в методе query_posts(days={days}) посты "
+        f"и составь дайджест по указанным каналам. "
+        f"по каждому каналу 2-3 предложения на главные темы. "
+        f"Если каналов нет - сообщи об этом пользователю. "
+        f"Если темы пересекаются - не нужно их отображать, покажи один раз, "
+        f"а в остальных источниках пропусти данную тему."
+    )
+
+    if channels is None:
+        return [
+            base.UserMessage(
+                EmbeddedResource(
+                    type="resource",
+                    resource=TextResourceContents(
+                        uri="tg://channels",
+                        text=channels_resource(),
+                        mimeType="text/plain",
+                    ),
+                )
+            ),
+            base.UserMessage(instruction),
+        ]
+
+    return [
+        base.UserMessage(f"Каналы: {channels}\n\n{instruction}"),
+    ]
+
+
 @mcp.completion()
 async def complete_channel_name(ref, argument: CompletionArgument, context) -> Completion | None:
-    if not isinstance(ref, ResourceTemplateReference):
-        return None
+    if isinstance(ref, ResourceTemplateReference):
+        channels = list_channels()
+        names = [c["channelname"] for c in channels]
+        return Completion(
+            values=[
+                n for n in names
+                if n.lower().startswith(argument.value.lower())
+            ]
+        )
 
-    channels = list_channels()
-    names = [c["channelname"] for c in channels]
+    if isinstance(ref, PromptReference) and argument.name == "channels":
+        channels = list_channels()
+        names = [c["channelname"] for c in channels]
+        return Completion(
+            values=[
+                n for n in names
+                if n.lower().startswith(argument.value.lower())
+            ]
+        )
 
-    return Completion(values=[n for n in names if n.lower().startswith(argument.value.lower())])
+    return None
 
 
 @mcp.tool()
